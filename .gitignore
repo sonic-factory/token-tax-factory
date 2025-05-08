@@ -2,6 +2,10 @@
 cache/
 out/
 
+# Node modules
+node_modules/
+package-lock.json
+
 # Ignores development broadcast logs
 !/broadcast
 /broadcast/*/31337/
