@@ -21,6 +21,8 @@ contract TaxToken is Initializable, ERC20Upgradeable, OwnableUpgradeable {
 
     /// @notice Scaling factor for decimal precision.
     uint256 public constant SCALING_FACTOR = 10_000; 
+    /// @notice The tax limit (50%)
+    uint256 public constant MAXIMUM_TAX = 5_000;
     /// @notice Transfer tax rate in basis points. (default = 5%)
     uint256 public transferTaxRate;
     /// @notice Maximum tax rate in basis points. (default = 20%)
@@ -50,14 +52,24 @@ contract TaxToken is Initializable, ERC20Upgradeable, OwnableUpgradeable {
     /// @param _transferTaxRate Transfer tax rate to be imposed. Expressed in basis points (ex. 1_000 = 10%).
     /// @param _maxTaxRate Maximum tax rate. Once set, CANNOT be modified again.
     /// @dev The constructor sets the initial values for the token and mints the initial supply to the owner.
-    constructor(
+    constructor() {
+        _disableInitializers();
+    }
+
+    function initialize(
+
         string memory _name,
         string memory _symbol,
         uint256 _initialSupply,
         uint256 _transferTaxRate,
         uint256 _maxTaxRate
 
-       ) ERC20(_name, _symbol) Ownable(msg.sender) {
+    ) external initializer {
+
+        __ERC20_init(_name, _symbol);
+        __Ownable_init(msg.sender);
+
+        if (_maxTaxRate > MAXIMUM_TAX) revert TaxRateExceedsMax();
 
         transferTaxRate = _transferTaxRate;
         maxTaxRate = _maxTaxRate;
