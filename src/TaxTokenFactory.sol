@@ -10,27 +10,35 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./TaxToken.sol";
 
 /**
- * @title Factory contract for Simple ERC20 Tokens
- * @author Kristian
- * @notice This contract clones a simple ERC20 token implementation.
+ * @notice This is a factory for creating TaxToken contracts.
  * @dev Proxy implementation are Clones. Implementation is immutable and not upgradeable.
  */
-contract TokenFactory is Ownable, Pausable, ReentrancyGuard {
+contract TaxTokenFactory is Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
+    /// @notice The address of the token implementation contract.
     address public immutable tokenImplementation;
+    /// @notice The address of the treasury where the fees are sent.
     address public treasury;
 
+    /// @notice The fee to create a new token.
     uint256 public creationFee;
+    /// @notice The number of tokens created.
     uint256 public tokenCounter;
 
+    /// @notice Mapping from token ID to token address.
     mapping(uint256 tokenId => address tokenAddress) public IdToAddress;
 
+    /// @notice Emitted when a new token is created.
     event TokenCreated(address token, address owner);
+    /// @notice Emitted when the treasury address is updated.
     event TreasuryUpdated(address treasury);
+    /// @notice Emitted when the creation fee is updated.
     event CreationFeeUpdated(uint256 creationFee);
 
+    /// @notice Thrown when the address set is zero
     error ZeroAddress();
+    /// @notice Thrown when the payable amount is zero
     error IncorrectFee();
 
     /**
@@ -61,25 +69,33 @@ contract TokenFactory is Ownable, Pausable, ReentrancyGuard {
      * @param name The name of the token
      * @param symbol The symbol of the token
      * @param initialSupply The initial supply of the token
+     * @param transferTaxRate The transfer tax rate of the token
+     * @param taxBeneficiary The address of the tax beneficiary
      * @param developer The address of the developer
     */
     function createToken(
         string memory name,
         string memory symbol,
         uint256 initialSupply,
+        uint256 transferTaxRate,
+        address taxBeneficiary,
         address developer
     ) external payable whenNotPaused nonReentrant {
-        if (developer == address(0)) revert ZeroAddress();
+        if (developer == address(0) || taxBeneficiary == address(0)) revert ZeroAddress();
         if (msg.value != creationFee) revert IncorrectFee();
 
         tokenCounter = tokenCounter + 1;
 
-        address token = Clones.cloneDeterministic(
-            tokenImplementation,
-            keccak256(abi.encodePacked(tokenCounter))
-        );
+        address token = Clones.clone(tokenImplementation);
 
-        TaxToken(token).initialize(name, symbol, initialSupply, msg.sender);
+        TaxToken(token).initialize(
+            name,
+            symbol,
+            initialSupply,
+            transferTaxRate,
+            taxBeneficiary,
+            developer
+        );
 
         IdToAddress[tokenCounter] = token;
 
@@ -95,8 +111,7 @@ contract TokenFactory is Ownable, Pausable, ReentrancyGuard {
     }
 
     /// @notice This function sets the creation fee.
-    function setCreationFee(uint256 _creationFee) external onlyOwner {
-        
+    function setCreationFee(uint256 _creationFee) external onlyOwner {       
         creationFee = _creationFee;
         emit CreationFeeUpdated(_creationFee);
     }
