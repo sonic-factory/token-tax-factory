@@ -8,7 +8,6 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 /**
  * @title TaxToken contract
  * @notice This contract implements an ERC20 token with a transfer tax mechanism.
- * @dev The tax is applied on transfers and the tax amount is burned by default.
  */
 contract TaxToken is Initializable, ERC20Upgradeable, OwnableUpgradeable {
 
@@ -21,68 +20,65 @@ contract TaxToken is Initializable, ERC20Upgradeable, OwnableUpgradeable {
 
     /// @notice Scaling factor for decimal precision.
     uint256 public constant SCALING_FACTOR = 10_000; 
-    /// @notice The tax limit (50%)
-    uint256 public constant MAXIMUM_TAX = 5_000;
+    /// @notice The tax limit by default (20%)
+    uint256 public constant MAXIMUM_TAX = 2_000;
     /// @notice Transfer tax rate in basis points. (default = 5%)
     uint256 public transferTaxRate;
-    /// @notice Maximum tax rate in basis points. (default = 20%)
-    uint256 public maxTaxRate;
+    /// @notice Transfer tax beneficiary address.
+    address public taxBeneficiary;
 
     /// @notice Recipient addresses that are to be excluded from tax.
     mapping(address => bool) public noTaxRecipient;
     /// @notice Sender addresses that are to be excluded from tax.
     mapping(address => bool) public noTaxSender;
 
-    /// @notice Token mint counter
-    uint256 public totalMinted = 0;
-    /// @notice Token burn counter
-    uint256 public totalBurned = 0;
-
     /// @notice Event emitted when the transfer tax rate is updated.
     event TransferTaxRateUpdated(address indexed owner, uint256 newRate);
+    /// @notice Event emitted when the tax beneficiary address is updated.
+    event TaxBeneficiaryUpdated(address indexed owner, address indexed taxBeneficiary);
     /// @notice Event emitted when a no tax sender address is set.
     event SetNoTaxSenderAddr(address indexed owner, address indexed noTaxSenderAddr, bool _value);
     /// @notice Event emitted when a no tax recipient address is set.
     event SetNoTaxRecipientAddr(address indexed owner, address indexed noTaxRecipientAddr, bool _value);
 
-    /// @notice Constructor arguments for the TaxToken contract.
-    /// @param _name Full name of the token.
-    /// @param _symbol Short name of the token.
-    /// @param _initialSupply Number of tokens to be minted. Expressed in wei.
-    /// @param _transferTaxRate Transfer tax rate to be imposed. Expressed in basis points (ex. 1_000 = 10%).
-    /// @param _maxTaxRate Maximum tax rate. Once set, CANNOT be modified again.
-    /// @dev The constructor sets the initial values for the token and mints the initial supply to the owner.
+
     constructor() {
         _disableInitializers();
     }
 
+    /// @notice Initialization arguments for the TaxToken contract.
+    /// @param _name Full name of the token.
+    /// @param _symbol Short name of the token.
+    /// @param _initialSupply Number of tokens to be minted. Expressed in wei.
+    /// @param _transferTaxRate Transfer tax rate to be imposed. Expressed in basis points (ex. 1_000 = 10%).
     function initialize(
 
         string memory _name,
         string memory _symbol,
         uint256 _initialSupply,
         uint256 _transferTaxRate,
-        uint256 _maxTaxRate
+        address _taxBeneficiary,
+        address _owner
 
     ) external initializer {
+        if (_transferTaxRate > MAXIMUM_TAX) revert TaxRateExceedsMax();
+        if (_taxBeneficiary == address(0)) revert ZeroAddress();
 
         __ERC20_init(_name, _symbol);
-        __Ownable_init(msg.sender);
-
-        if (_maxTaxRate > MAXIMUM_TAX) revert TaxRateExceedsMax();
+        __Ownable_init(_owner);
 
         transferTaxRate = _transferTaxRate;
-        maxTaxRate = _maxTaxRate;
+        taxBeneficiary = _taxBeneficiary;
 
-        noTaxRecipient[msg.sender] = true;
-        noTaxSender[msg.sender] = true;
+        noTaxRecipient[_owner] = true;
+        noTaxSender[_owner] = true;
 
-        totalMinted = totalMinted + _initialSupply;
-        _mint(msg.sender, _initialSupply);
+        _mint(_owner, _initialSupply);
 
         emit TransferTaxRateUpdated(msg.sender, transferTaxRate);
-        emit SetNoTaxSenderAddr(msg.sender, msg.sender, true);
-        emit SetNoTaxRecipientAddr(msg.sender, msg.sender, true);
+        emit TaxBeneficiaryUpdated(msg.sender, taxBeneficiary);
+        emit SetNoTaxSenderAddr(msg.sender, _owner, true);
+        emit SetNoTaxRecipientAddr(msg.sender, _owner, true);
     }
 
     /// @notice External privileged function to create or mint an X amount of tokens to a specified address.
@@ -90,7 +86,6 @@ contract TaxToken is Initializable, ERC20Upgradeable, OwnableUpgradeable {
         if (_to == address(0)) revert ZeroAddress();
         if (_amount == 0) revert ZeroAmount();
 
-        totalMinted = totalMinted + _amount;   
         _mint(_to, _amount);
     }
 
@@ -98,14 +93,12 @@ contract TaxToken is Initializable, ERC20Upgradeable, OwnableUpgradeable {
     function burn(uint256 _amount) external {
         if (_amount == 0) revert ZeroAmount();
 
-        totalBurned = totalBurned + _amount;
         _burn(msg.sender, _amount);
     }
 
     /// @notice Overrides transfer function to meet tokenomics of tax token
     function _update(address from, address to, uint256 value) internal virtual override {
         
-        // This computation results to a rounded up tax amount that can handle small amounts. Rounds up to minimum of 1 wei.
         uint256 taxAmount = value * transferTaxRate / SCALING_FACTOR;
         uint256 sendAmount = value - taxAmount;
 
@@ -116,25 +109,47 @@ contract TaxToken is Initializable, ERC20Upgradeable, OwnableUpgradeable {
             
         } else {
 
-            totalBurned = totalBurned + taxAmount;
-
-            //Transfer with tax, burns the tax amount and transfers the net amount.
-            _burn(from, taxAmount);
+            // Transfer with tax, sends the tax amount to beneficiary and the net amount to recipient
+            super._update(from, taxBeneficiary, taxAmount);
             super._update(from, to, sendAmount);
         }
     }
 
     /// @notice External privileged function to update the transfer tax rate up to the maximum tax rate set.
     function updateTransferTaxRate(uint256 _transferTaxRate) external onlyOwner {
-        if (_transferTaxRate > maxTaxRate) revert TaxRateExceedsMax();
+        if (_transferTaxRate > MAXIMUM_TAX) revert TaxRateExceedsMax();
 
         transferTaxRate = _transferTaxRate;
 
         emit TransferTaxRateUpdated(msg.sender, _transferTaxRate);
     }
 
+    /// @notice External privileged function to update the tax beneficiary address.
+    function updateTaxBeneficiary(address _taxBeneficiary) external onlyOwner {
+        if (_taxBeneficiary == address(0)) revert ZeroAddress();
+
+        address previousBeneficiary = taxBeneficiary;
+        noTaxRecipient[previousBeneficiary] = false;
+        noTaxSender[previousBeneficiary] = false;
+
+        taxBeneficiary = _taxBeneficiary;
+
+        noTaxSender[_taxBeneficiary] = true;
+        noTaxRecipient[_taxBeneficiary] = true;
+
+        // Emit events for the previous tax beneficiary
+        emit SetNoTaxRecipientAddr(msg.sender, previousBeneficiary, false);
+        emit SetNoTaxSenderAddr(msg.sender, previousBeneficiary, false);
+
+        // Emit events for the new tax beneficiary
+        emit SetNoTaxSenderAddr(msg.sender, _taxBeneficiary, true);
+        emit SetNoTaxRecipientAddr(msg.sender, _taxBeneficiary, true);
+        emit TaxBeneficiaryUpdated(msg.sender, _taxBeneficiary);
+    }
+
     /// @notice External privileged function to update the no tax mapping for senders.
     function setNoTaxSenderAddr(address _noTaxSenderAddr, bool _value) external onlyOwner {
+        if (_noTaxSenderAddr == address(0)) revert ZeroAddress();
         noTaxSender[_noTaxSenderAddr] = _value;
 
         emit SetNoTaxSenderAddr(msg.sender, _noTaxSenderAddr, _value);
@@ -142,6 +157,7 @@ contract TaxToken is Initializable, ERC20Upgradeable, OwnableUpgradeable {
 
     /// @notice External privileged function to update the no tax mapping for recipients.
     function setNoTaxRecipientAddr(address _noTaxRecipientAddr, bool _value) external onlyOwner {
+        if (_noTaxRecipientAddr == address(0)) revert ZeroAddress();
         noTaxRecipient[_noTaxRecipientAddr] = _value;
 
         emit SetNoTaxRecipientAddr(msg.sender, _noTaxRecipientAddr, _value);
