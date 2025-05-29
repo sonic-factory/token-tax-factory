@@ -99,7 +99,7 @@ contract TaxToken is Initializable, ERC20Upgradeable, OwnableUpgradeable {
     /// @notice Overrides transfer function to meet tokenomics of tax token
     function _update(address from, address to, uint256 value) internal virtual override {
         
-        uint256 taxAmount = value * transferTaxRate / SCALING_FACTOR;
+        uint256 taxAmount = (value * transferTaxRate + SCALING_FACTOR - 1) / SCALING_FACTOR;
         uint256 sendAmount = value - taxAmount;
 
         if (taxAmount == 0 || noTaxRecipient[to] == true || noTaxSender[from] == true || from == address(0) || to == address(0)) {
