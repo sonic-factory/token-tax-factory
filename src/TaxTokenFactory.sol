@@ -80,13 +80,13 @@ contract TaxTokenFactory is Ownable, Pausable, ReentrancyGuard {
         uint256 transferTaxRate,
         address taxBeneficiary,
         address developer
-    ) external payable whenNotPaused nonReentrant {
+    ) external payable whenNotPaused nonReentrant returns (address token) {
         if (developer == address(0) || taxBeneficiary == address(0)) revert ZeroAddress();
         if (msg.value != creationFee) revert IncorrectFee();
 
         tokenCounter = tokenCounter + 1;
 
-        address token = Clones.clone(tokenImplementation);
+        token = Clones.clone(tokenImplementation);
 
         TaxToken(token).initialize(
             name,
